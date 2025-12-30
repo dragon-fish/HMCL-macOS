@@ -1,0 +1,23 @@
+#!/bin/zsh
+set -e
+
+APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+JAR="$APP_DIR/../Resources/HMCL.jar"
+
+# 找 Java：优先使用 java_home（更兼容 macOS 多版本 Java）
+JAVA_HOME=$(/usr/libexec/java_home 2>/dev/null || true)
+
+if [[ -n "$JAVA_HOME" && -x "$JAVA_HOME/bin/java" ]]; then
+  JAVA="$JAVA_HOME/bin/java"
+elif command -v java >/dev/null 2>&1; then
+  JAVA="$(command -v java)"
+else
+  osascript -e 'display dialog "未找到 Java。请先安装 JRE/JDK（例如 Temurin/Oracle），然后再启动 HMCL。" buttons {"OK"} default button 1 with icon stop'
+  exit 1
+fi
+
+# 切到 jar 所在目录运行（有些程序依赖相对路径）
+cd "$(dirname "$JAR")"
+
+# 后台启动，避免阻塞；日志可按需改路径
+"$JAVA" -jar "$JAR" >/tmp/HMCL.log 2>&1 &
