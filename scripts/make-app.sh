@@ -9,21 +9,24 @@ ICON_FILE_DEFAULT="$PROJECT_ROOT/.output/HMCL.icns"
 OUT_DIR="$PROJECT_ROOT/.output"
 TEMPLATE_DIR="$PROJECT_ROOT/src/HMCL"
 OUTPUT_FILE="$OUT_DIR/HMCL.app"
+VERSION_FILE_DEFAULT="$PROJECT_ROOT/VERSION"
 
 print_help() {
   cat <<'EOF'
 用法:
-  ./scripts/make-app.sh [--jar <path>] [--icon <path>]
+  ./scripts/make-app.sh [--jar <path>] [--icon <path>] [--version <version>]
 
 说明:
   - 默认 jar:  ./HMCL.jar
   - 默认 icon: ./.output/HMCL.icns
+  - 默认版本:  读取仓库根目录 VERSION（用于写入 Info.plist 的 CFBundleVersion / CFBundleShortVersionString）
   - 输出:      ./.output/HMCL.app
 EOF
 }
 
 JAR_FILE="$JAR_FILE_DEFAULT"
 ICON_FILE="$ICON_FILE_DEFAULT"
+APP_VERSION=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -38,6 +41,10 @@ while [[ $# -gt 0 ]]; do
     --icon)
       shift
       ICON_FILE="${1-}"
+      ;;
+    --version)
+      shift
+      APP_VERSION="${1-}"
       ;;
     *)
       echo "未知参数: $1" >&2
@@ -75,5 +82,30 @@ cp -L "$JAR_FILE" "$OUTPUT_FILE/Contents/Resources/HMCL.jar"
 
 echo "Copying icon to $OUTPUT_FILE/Contents/Resources/HMCL.icns"
 cp -L "$ICON_FILE" "$OUTPUT_FILE/Contents/Resources/HMCL.icns"
+
+if [[ -z "${APP_VERSION:-}" ]]; then
+  if [[ -f "$VERSION_FILE_DEFAULT" ]]; then
+    APP_VERSION="$(tr -d ' \r\n' < "$VERSION_FILE_DEFAULT")"
+  fi
+fi
+
+if [[ -n "${APP_VERSION:-}" ]]; then
+  INFO_PLIST="$OUTPUT_FILE/Contents/Info.plist"
+  if [[ -f "$INFO_PLIST" ]]; then
+    if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
+      echo "Updating Info.plist version to $APP_VERSION"
+      /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $APP_VERSION" "$INFO_PLIST" \
+        || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $APP_VERSION" "$INFO_PLIST"
+      /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$INFO_PLIST" \
+        || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $APP_VERSION" "$INFO_PLIST"
+    else
+      echo "Warning: PlistBuddy not found; skipping Info.plist version update." >&2
+    fi
+  else
+    echo "Warning: Info.plist not found; skipping version update: $INFO_PLIST" >&2
+  fi
+else
+  echo "Warning: VERSION not provided and VERSION file not found/empty; leaving Info.plist version unchanged." >&2
+fi
 
 echo "App created at $OUTPUT_FILE"

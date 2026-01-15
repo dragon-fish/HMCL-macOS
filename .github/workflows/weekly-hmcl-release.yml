@@ -1,0 +1,104 @@
+name: Weekly HMCL upstream check & release
+
+on:
+  schedule:
+    # GitHub Actions schedule uses UTC.
+    - cron: "0 0 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: weekly-hmcl-release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Ensure dependencies
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+        run: |
+          set -euo pipefail
+          if ! command -v jq >/dev/null 2>&1; then
+            brew install jq
+          fi
+
+      - name: Fetch upstream latest & decide
+        id: decide
+        run: |
+          set -euo pipefail
+
+          ./scripts/fetch-latest-jar.sh
+
+          LATEST_TAG="$(jq -r '.tag_name' .cache/hmcl-latest.json)"
+          if [[ -z "${LATEST_TAG}" || "${LATEST_TAG}" == "null" ]]; then
+            echo "Failed to read .tag_name from .cache/hmcl-latest.json" >&2
+            exit 1
+          fi
+
+          # 上游一般是 vX.Y.Z，这里统一去掉前缀 v
+          LATEST_VERSION="${LATEST_TAG#v}"
+          CURRENT_VERSION="$(tr -d ' \r\n' < VERSION)"
+
+          echo "latest_version=$LATEST_VERSION" >> "$GITHUB_OUTPUT"
+          echo "current_version=$CURRENT_VERSION" >> "$GITHUB_OUTPUT"
+
+          if [[ "$LATEST_VERSION" == "$CURRENT_VERSION" ]]; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Up to date: VERSION=$CURRENT_VERSION"
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "New upstream version found: $CURRENT_VERSION -> $LATEST_VERSION"
+          fi
+
+      - name: Bump VERSION, commit and tag
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          VERSION: ${{ steps.decide.outputs.latest_version }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "Tag already exists: $VERSION" >&2
+            exit 1
+          fi
+
+          echo "$VERSION" > VERSION
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add VERSION
+          git commit -m "chore: bump HMCL to $VERSION"
+          git tag -a "$VERSION" -m "HMCL $VERSION"
+
+          git push origin "HEAD:$BRANCH"
+          git push origin "$VERSION"
+
+      - name: Build DMG
+        if: steps.decide.outputs.should_release == 'true'
+        run: |
+          set -euo pipefail
+          make workflow
+
+          VERSION="${{ steps.decide.outputs.latest_version }}"
+          cp -f ./.output/HMCL.dmg "./.output/HMCL-${VERSION}.dmg"
+
+      - name: Create GitHub Release & upload DMG
+        if: steps.decide.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.decide.outputs.latest_version }}
+          name: HMCL macOS ${{ steps.decide.outputs.latest_version }}
+          generate_release_notes: true
+          files: |
+            ./.output/HMCL-${{ steps.decide.outputs.latest_version }}.dmg
