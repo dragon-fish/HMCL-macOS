@@ -16,6 +16,9 @@ concurrency:
 jobs:
   release:
     runs-on: macos-latest
+    env:
+      # 供脚本访问 GitHub API（避免匿名请求在 Actions runner 上触发 403 限流）
+      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -97,6 +100,7 @@ jobs:
         if: steps.decide.outputs.should_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          token: ${{ github.token }}
           tag_name: ${{ steps.decide.outputs.latest_version }}
           name: HMCL macOS ${{ steps.decide.outputs.latest_version }}
           generate_release_notes: true

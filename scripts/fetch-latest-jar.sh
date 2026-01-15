@@ -21,9 +21,18 @@ echo "Fetching latest release metadata from GitHub API..."
 TMP_JSON="$(mktemp)"
 trap 'rm -f "$TMP_JSON"' EXIT
 
-curl -fsSL \
-  -H "Accept: application/vnd.github+json" \
-  "$API_URL" >"$TMP_JSON"
+CURL_HEADERS=(
+  -H "Accept: application/vnd.github+json"
+  -H "X-GitHub-Api-Version: 2022-11-28"
+  -H "User-Agent: HMCL-macOS"
+)
+
+# 在 GitHub Actions 中传入 GITHUB_TOKEN 可避免匿名请求触发限流（403）
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+  CURL_HEADERS+=(-H "Authorization: Bearer $GITHUB_TOKEN")
+fi
+
+curl -fsSL "${CURL_HEADERS[@]}" "$API_URL" >"$TMP_JSON"
 
 META_PATH="$CACHE_DIR/hmcl-latest.json"
 
